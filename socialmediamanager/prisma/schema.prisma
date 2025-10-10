@@ -71,6 +71,10 @@ model Brand {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // YouTube API Credentials (per-brand)
+  youtubeClientId     String? // Google OAuth Client ID
+  youtubeClientSecret String? // Encrypted Google OAuth Client Secret
+
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   socialAccounts SocialAccount[]
 }

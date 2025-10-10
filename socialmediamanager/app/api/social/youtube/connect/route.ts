@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
+import { prisma } from "@/lib/prisma"
 import { google } from "googleapis"
+import { decrypt } from "@/lib/encryption"
 
 export async function GET(request: Request) {
   try {
@@ -21,14 +23,43 @@ export async function GET(request: Request) {
       )
     }
 
+    // Get brand with YouTube credentials
+    const brand = await prisma.brand.findFirst({
+      where: {
+        id: brandId,
+        userId: session.user.id,
+      },
+    })
+
+    if (!brand) {
+      return NextResponse.json({ error: "Brand not found" }, { status: 404 })
+    }
+
+    // Check if brand has YouTube credentials
+    if (!brand.youtubeClientId || !brand.youtubeClientSecret) {
+      return NextResponse.json(
+        {
+          error: "YouTube credentials not configured",
+          message: "Please add YouTube API credentials to this brand first",
+        },
+        { status: 400 }
+      )
+    }
+
+    // Decrypt client secret
+    const clientSecret = decrypt(brand.youtubeClientSecret)
+
+    // Create OAuth2 client with brand's credentials
     const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
+      brand.youtubeClientId,
+      clientSecret,
       `${process.env.NEXTAUTH_URL}/api/social/youtube/callback`
     )
 
     const scopes = [
       "https://www.googleapis.com/auth/youtube.readonly",
+      "https://www.googleapis.com/auth/youtube.upload",
+      "https://www.googleapis.com/auth/youtube.force-ssl",
       "https://www.googleapis.com/auth/userinfo.profile",
     ]
 

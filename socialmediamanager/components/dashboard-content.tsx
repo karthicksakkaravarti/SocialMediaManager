@@ -1,10 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useSearchParams } from "next/navigation"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Youtube, CheckCircle2, XCircle, BarChart3, Users, TrendingUp, Plus } from "lucide-react"
+import { Youtube, CheckCircle2, XCircle, BarChart3, Users, TrendingUp, Plus, Settings, Lock, ExternalLink } from "lucide-react"
+import { YouTubeCredentialsSetup } from "@/components/youtube-credentials-setup"
 
 type SocialAccount = {
   id: string
@@ -30,11 +32,36 @@ type User = {
 export function DashboardContent({ brand, user }: { brand: Brand; user: User }) {
   const searchParams = useSearchParams()
   const [isConnecting, setIsConnecting] = useState(false)
+  const [showSetupWizard, setShowSetupWizard] = useState(false)
+  const [hasYouTubeCredentials, setHasYouTubeCredentials] = useState(false)
+  const [isCheckingCredentials, setIsCheckingCredentials] = useState(true)
 
   const success = searchParams.get("success")
   const error = searchParams.get("error")
 
+  // Check if brand has YouTube credentials
+  useEffect(() => {
+    const checkCredentials = async () => {
+      try {
+        const response = await fetch(`/api/youtube/credentials?brandId=${brand.id}`)
+        const data = await response.json()
+        setHasYouTubeCredentials(data.hasCredentials)
+      } catch (error) {
+        console.error("Failed to check credentials:", error)
+      } finally {
+        setIsCheckingCredentials(false)
+      }
+    }
+
+    checkCredentials()
+  }, [brand.id])
+
   const handleConnectYouTube = async () => {
+    if (!hasYouTubeCredentials) {
+      setShowSetupWizard(true)
+      return
+    }
+
     setIsConnecting(true)
     try {
       const response = await fetch(`/api/social/youtube/connect?brandId=${brand.id}`)
@@ -42,8 +69,11 @@ export function DashboardContent({ brand, user }: { brand: Brand; user: User }) 
 
       if (data.url) {
         window.location.href = data.url
+      } else if (data.error === "YouTube credentials not configured") {
+        setShowSetupWizard(true)
+        setIsConnecting(false)
       } else {
-        alert("Failed to connect YouTube account")
+        alert(data.message || "Failed to connect YouTube account")
         setIsConnecting(false)
       }
     } catch (error) {
@@ -52,10 +82,22 @@ export function DashboardContent({ brand, user }: { brand: Brand; user: User }) 
     }
   }
 
+  const handleSetupSuccess = () => {
+    setHasYouTubeCredentials(true)
+  }
+
   const youtubeAccount = brand.socialAccounts.find((acc) => acc.platform === "youtube")
 
   return (
     <div className="space-y-6 p-6">
+      {/* YouTube Credentials Setup Dialog */}
+      <YouTubeCredentialsSetup
+        brandId={brand.id}
+        open={showSetupWizard}
+        onOpenChange={setShowSetupWizard}
+        onSuccess={handleSetupSuccess}
+      />
+
       {/* Success/Error Messages */}
       {success === "youtube_connected" && (
         <div className="rounded-lg bg-green-50 dark:bg-green-950/50 border border-green-200 dark:border-green-900 p-4 flex items-center gap-3">
@@ -74,6 +116,7 @@ export function DashboardContent({ brand, user }: { brand: Brand; user: User }) 
             {error === "no_channel" && "No YouTube channel found"}
             {error === "account_already_linked" && "This account is already linked to another brand"}
             {error === "connection_failed" && "Failed to connect account"}
+            {error === "credentials_not_configured" && "YouTube credentials not configured. Please set up your API credentials first."}
           </p>
         </div>
       )}
@@ -140,44 +183,81 @@ export function DashboardContent({ brand, user }: { brand: Brand; user: User }) 
         </CardHeader>
         <CardContent className="space-y-3">
           {/* YouTube */}
-          {youtubeAccount ? (
-            <div className="flex items-center gap-4 rounded-lg border bg-card p-4 transition-colors hover:bg-accent/50">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-br from-red-500 to-red-600 text-white">
-                <Youtube className="h-6 w-6" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="font-medium truncate">
-                    {youtubeAccount.platformUsername || "YouTube Channel"}
-                  </p>
-                  <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-500 flex-shrink-0" />
+          {!isCheckingCredentials && (
+            <>
+              {!hasYouTubeCredentials ? (
+                // YouTube credentials not configured
+                <div className="rounded-lg border-2 border-dashed border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/20 p-6">
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-950">
+                      <Lock className="h-6 w-6 text-amber-600 dark:text-amber-500" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-amber-900 dark:text-amber-100 mb-1">
+                        YouTube API Setup Required
+                      </h4>
+                      <p className="text-sm text-amber-800 dark:text-amber-200 mb-4">
+                        To use YouTube features, you need to add your own YouTube API credentials. This gives you full control and unlimited quota.
+                      </p>
+                      <Button
+                        onClick={() => setShowSetupWizard(true)}
+                        variant="default"
+                        size="sm"
+                      >
+                        <Settings className="h-4 w-4 mr-2" />
+                        Setup YouTube API
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  Connected {new Date(youtubeAccount.createdAt).toLocaleDateString()}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center gap-4 rounded-lg border border-dashed bg-muted/50 p-4 transition-colors hover:bg-muted">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted-foreground/10">
-                <Youtube className="h-6 w-6 text-muted-foreground" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium">YouTube</p>
-                <p className="text-sm text-muted-foreground">
-                  Connect your YouTube channel to get started
-                </p>
-              </div>
-              <Button
-                onClick={handleConnectYouTube}
-                disabled={isConnecting}
-                size="sm"
-                className="flex-shrink-0"
-              >
-                <Plus className="h-4 w-4 mr-1" />
-                {isConnecting ? "Connecting..." : "Connect"}
-              </Button>
-            </div>
+              ) : youtubeAccount ? (
+                // YouTube channel connected
+                <div className="flex items-center gap-4 rounded-lg border bg-card p-4 transition-colors hover:bg-accent/50">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-br from-red-500 to-red-600 text-white">
+                    <Youtube className="h-6 w-6" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium truncate">
+                        {youtubeAccount.platformUsername || "YouTube Channel"}
+                      </p>
+                      <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-500 flex-shrink-0" />
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Connected {new Date(youtubeAccount.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <Link href={`/dashboard/youtube?brand=${brand.id}`}>
+                    <Button size="sm" variant="outline" className="flex-shrink-0">
+                      <ExternalLink className="h-4 w-4 mr-2" />
+                      Manage
+                    </Button>
+                  </Link>
+                </div>
+              ) : (
+                // YouTube credentials configured but channel not connected
+                <div className="flex items-center gap-4 rounded-lg border border-dashed bg-muted/50 p-4 transition-colors hover:bg-muted">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted-foreground/10">
+                    <Youtube className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-medium">YouTube</p>
+                    <p className="text-sm text-muted-foreground">
+                      Connect your YouTube channel to get started
+                    </p>
+                  </div>
+                  <Button
+                    onClick={handleConnectYouTube}
+                    disabled={isConnecting}
+                    size="sm"
+                    className="flex-shrink-0"
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    {isConnecting ? "Connecting..." : "Connect"}
+                  </Button>
+                </div>
+              )}
+            </>
           )}
 
           {/* Coming Soon Platforms */}

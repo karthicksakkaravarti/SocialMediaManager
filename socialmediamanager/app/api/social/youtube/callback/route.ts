@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { google } from "googleapis"
+import { decrypt } from "@/lib/encryption"
 
 export async function GET(request: Request) {
   try {
@@ -29,7 +30,7 @@ export async function GET(request: Request) {
       )
     }
 
-    // Verify brand belongs to user
+    // Verify brand belongs to user and has YouTube credentials
     const brand = await prisma.brand.findFirst({
       where: {
         id: brandId,
@@ -43,9 +44,19 @@ export async function GET(request: Request) {
       )
     }
 
+    if (!brand.youtubeClientId || !brand.youtubeClientSecret) {
+      return NextResponse.redirect(
+        `${process.env.NEXTAUTH_URL}/dashboard?error=credentials_not_configured`
+      )
+    }
+
+    // Decrypt client secret
+    const clientSecret = decrypt(brand.youtubeClientSecret)
+
+    // Create OAuth2 client with brand's credentials
     const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
+      brand.youtubeClientId,
+      clientSecret,
       `${process.env.NEXTAUTH_URL}/api/social/youtube/callback`
     )
 
@@ -56,7 +67,7 @@ export async function GET(request: Request) {
     // Get YouTube channel info
     const youtube = google.youtube({ version: "v3", auth: oauth2Client })
     const channelResponse = await youtube.channels.list({
-      part: ["snippet"],
+      part: ["snippet", "statistics"],
       mine: true,
     })
 
@@ -113,7 +124,7 @@ export async function GET(request: Request) {
     })
 
     return NextResponse.redirect(
-      `${process.env.NEXTAUTH_URL}/dashboard?success=youtube_connected`
+      `${process.env.NEXTAUTH_URL}/dashboard?brand=${brandId}&success=youtube_connected`
     )
   } catch (error) {
     console.error("Error connecting YouTube account:", error)
