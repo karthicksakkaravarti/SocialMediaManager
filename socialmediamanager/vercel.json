@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/video-generator/cron?secret=$CRON_SECRET",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}

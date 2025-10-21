@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Youtube, CheckCircle2, XCircle, BarChart3, Users, TrendingUp, Plus, Settings, Lock, ExternalLink } from "lucide-react"
+import { Youtube, CheckCircle2, XCircle, BarChart3, Users, TrendingUp, Plus, Settings, Lock, ExternalLink, Unplug, RefreshCw, AlertCircle } from "lucide-react"
 import { YouTubeCredentialsSetup } from "@/components/youtube-credentials-setup"
 
 type SocialAccount = {
@@ -32,9 +32,11 @@ type User = {
 export function DashboardContent({ brand, user }: { brand: Brand; user: User }) {
   const searchParams = useSearchParams()
   const [isConnecting, setIsConnecting] = useState(false)
+  const [isDisconnecting, setIsDisconnecting] = useState(false)
   const [showSetupWizard, setShowSetupWizard] = useState(false)
   const [hasYouTubeCredentials, setHasYouTubeCredentials] = useState(false)
   const [isCheckingCredentials, setIsCheckingCredentials] = useState(true)
+  const [accountHealth, setAccountHealth] = useState<{ isValid: boolean; needsReconnect: boolean; error?: string } | null>(null)
 
   const success = searchParams.get("success")
   const error = searchParams.get("error")
@@ -55,6 +57,27 @@ export function DashboardContent({ brand, user }: { brand: Brand; user: User }) 
 
     checkCredentials()
   }, [brand.id])
+
+  // Check YouTube account health if connected
+  useEffect(() => {
+    const checkHealth = async () => {
+      const youtubeAccount = brand.socialAccounts.find((acc) => acc.platform === "youtube")
+      if (!youtubeAccount) {
+        setAccountHealth(null)
+        return
+      }
+
+      try {
+        const response = await fetch(`/api/social/youtube/health?accountId=${youtubeAccount.id}`)
+        const data = await response.json()
+        setAccountHealth(data)
+      } catch (error) {
+        console.error("Failed to check account health:", error)
+      }
+    }
+
+    checkHealth()
+  }, [brand.socialAccounts])
 
   const handleConnectYouTube = async () => {
     if (!hasYouTubeCredentials) {
@@ -84,6 +107,71 @@ export function DashboardContent({ brand, user }: { brand: Brand; user: User }) 
 
   const handleSetupSuccess = () => {
     setHasYouTubeCredentials(true)
+  }
+
+  const handleDisconnectYouTube = async () => {
+    const youtubeAccount = brand.socialAccounts.find((acc) => acc.platform === "youtube")
+    if (!youtubeAccount) return
+
+    if (!confirm("Are you sure you want to disconnect this YouTube account?")) {
+      return
+    }
+
+    setIsDisconnecting(true)
+    try {
+      const response = await fetch(
+        `/api/social/youtube/disconnect?accountId=${youtubeAccount.id}`,
+        { method: "DELETE" }
+      )
+      const data = await response.json()
+
+      if (response.ok) {
+        // Reload the page to show updated state
+        window.location.reload()
+      } else {
+        alert(data.error || "Failed to disconnect YouTube account")
+      }
+    } catch (error) {
+      alert("Failed to disconnect YouTube account")
+    } finally {
+      setIsDisconnecting(false)
+    }
+  }
+
+  const handleReconnectYouTube = async () => {
+    // First disconnect, then reconnect
+    const youtubeAccount = brand.socialAccounts.find((acc) => acc.platform === "youtube")
+    if (!youtubeAccount) return
+
+    if (!confirm("This will disconnect and reconnect your YouTube account. Continue?")) {
+      return
+    }
+
+    setIsDisconnecting(true)
+    try {
+      // Disconnect
+      const disconnectResponse = await fetch(
+        `/api/social/youtube/disconnect?accountId=${youtubeAccount.id}`,
+        { method: "DELETE" }
+      )
+
+      if (!disconnectResponse.ok) {
+        throw new Error("Failed to disconnect")
+      }
+
+      // Then connect
+      const connectResponse = await fetch(`/api/social/youtube/connect?brandId=${brand.id}`)
+      const data = await connectResponse.json()
+
+      if (data.url) {
+        window.location.href = data.url
+      } else {
+        throw new Error(data.message || "Failed to reconnect")
+      }
+    } catch (error) {
+      alert("Failed to reconnect YouTube account")
+      setIsDisconnecting(false)
+    }
   }
 
   const youtubeAccount = brand.socialAccounts.find((acc) => acc.platform === "youtube")
@@ -212,28 +300,71 @@ export function DashboardContent({ brand, user }: { brand: Brand; user: User }) 
                 </div>
               ) : youtubeAccount ? (
                 // YouTube channel connected
-                <div className="flex items-center gap-4 rounded-lg border bg-card p-4 transition-colors hover:bg-accent/50">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-br from-red-500 to-red-600 text-white">
-                    <Youtube className="h-6 w-6" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium truncate">
-                        {youtubeAccount.platformUsername || "YouTube Channel"}
-                      </p>
-                      <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-500 flex-shrink-0" />
+                <>
+                  {accountHealth?.needsReconnect && (
+                    <div className="rounded-lg border-2 border-red-200 dark:border-red-900 bg-red-50/50 dark:bg-red-950/20 p-4">
+                      <div className="flex items-start gap-3">
+                        <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-500 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <h4 className="font-semibold text-red-900 dark:text-red-100 mb-1">
+                            YouTube Account Needs Reconnection
+                          </h4>
+                          <p className="text-sm text-red-800 dark:text-red-200 mb-3">
+                            {accountHealth.error || "The OAuth tokens have expired or become invalid. Please reconnect your account to continue uploading videos."}
+                          </p>
+                          <Button
+                            onClick={handleReconnectYouTube}
+                            disabled={isDisconnecting}
+                            size="sm"
+                            variant="destructive"
+                          >
+                            <RefreshCw className="h-4 w-4 mr-2" />
+                            {isDisconnecting ? "Reconnecting..." : "Reconnect Now"}
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                    <p className="text-sm text-muted-foreground">
-                      Connected {new Date(youtubeAccount.createdAt).toLocaleDateString()}
-                    </p>
+                  )}
+                  <div className="flex items-center gap-4 rounded-lg border bg-card p-4 transition-colors hover:bg-accent/50">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-br from-red-500 to-red-600 text-white">
+                      <Youtube className="h-6 w-6" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium truncate">
+                          {youtubeAccount.platformUsername || "YouTube Channel"}
+                        </p>
+                        {accountHealth?.isValid ? (
+                          <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-500 flex-shrink-0" />
+                        ) : accountHealth?.needsReconnect ? (
+                          <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-500 flex-shrink-0" />
+                        ) : (
+                          <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-500 flex-shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Connected {new Date(youtubeAccount.createdAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 flex-shrink-0">
+                      <Link href={`/dashboard/youtube?brand=${brand.id}`}>
+                        <Button size="sm" variant="outline">
+                          <ExternalLink className="h-4 w-4 mr-2" />
+                          Manage
+                        </Button>
+                      </Link>
+                      <Button
+                        onClick={handleDisconnectYouTube}
+                        disabled={isDisconnecting}
+                        size="sm"
+                        variant="ghost"
+                      >
+                        <Unplug className="h-4 w-4 mr-2" />
+                        {isDisconnecting ? "..." : "Disconnect"}
+                      </Button>
+                    </div>
                   </div>
-                  <Link href={`/dashboard/youtube?brand=${brand.id}`}>
-                    <Button size="sm" variant="outline" className="flex-shrink-0">
-                      <ExternalLink className="h-4 w-4 mr-2" />
-                      Manage
-                    </Button>
-                  </Link>
-                </div>
+                </>
               ) : (
                 // YouTube credentials configured but channel not connected
                 <div className="flex items-center gap-4 rounded-lg border border-dashed bg-muted/50 p-4 transition-colors hover:bg-muted">

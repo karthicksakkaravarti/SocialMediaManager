@@ -77,6 +77,8 @@ model Brand {
 
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   socialAccounts SocialAccount[]
+  videoScripts   VideoScript[]
+  publishConfig  PublishConfig?
 }
 
 model SocialAccount {
@@ -92,8 +94,105 @@ model SocialAccount {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  brand Brand @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  brand          Brand          @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  videoPublishes VideoPublish[]
 
   @@unique([platform, platformAccountId])
   @@index([brandId])
+}
+
+// Video script storage
+model VideoScript {
+  id          String   @id @default(cuid())
+  brandId     String
+
+  // Script content
+  title       String
+  scriptJson  Json     // Full script: { title, scenes, background_music, watermark, media }
+
+  // Scheduling
+  status      String   // "draft", "scheduled", "processing", "completed", "failed"
+  scheduledAt DateTime?
+
+  // Generation result
+  generatedAt DateTime?
+  videoUrl    String?  // Download URL from API
+  videoPath   String?  // Local path if downloaded
+  duration    Float?   // Video duration in seconds
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  brand       Brand         @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  jobs        VideoJob[]
+  publishes   VideoPublish[]
+
+  @@index([brandId, status])
+  @@index([scheduledAt])
+}
+
+// Track external API job
+model VideoJob {
+  id            String   @id @default(cuid())
+  scriptId      String
+
+  // API job tracking
+  jobId         String   @unique  // Job ID from external API
+  status        String   // "pending", "processing", "completed", "failed", "cancelled"
+  progress      Float    @default(0) // 0-100
+  currentScene  Int?
+  totalScenes   Int?
+
+  // Results/Errors
+  videoUrl      String?
+  videoPath     String?
+  duration      Float?
+  errorMessage  String?  @db.Text
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  script        VideoScript @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([status])
+}
+
+// Multi-channel publish tracking
+model VideoPublish {
+  id              String   @id @default(cuid())
+  scriptId        String
+  socialAccountId String
+
+  // Publish status
+  status          String   // "pending_approval", "approved", "publishing", "published", "failed"
+
+  // YouTube result
+  youtubeVideoId  String?  // YouTube video ID
+  publishedAt     DateTime?
+  errorMessage    String?  @db.Text
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  script          VideoScript   @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  socialAccount   SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([scriptId, socialAccountId])
+  @@index([status])
+}
+
+// Per-brand publish configuration
+model PublishConfig {
+  id                String   @id @default(cuid())
+  brandId           String   @unique
+
+  // Settings
+  requireApproval   Boolean  @default(true)   // Require manual approval before publishing
+  autoPublish       Boolean  @default(false)  // Auto-publish when video completes
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  brand             Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
 }
